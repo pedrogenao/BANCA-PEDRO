@@ -1,20 +1,11 @@
 /* ========================================================================
    GENERADOR-NUMEROS.JS
-   Motor ÚNICO y COMPARTIDO para generar números del Numerólogo. Antes esto
-   lo hacía main.py (y guardaba el resultado en Firestore); ahora main.py
-   SOLO escalpea resultados oficiales, y este motor corre en el navegador,
-   reutilizado por:
-     - "Números → Numerólogo" (numeros.js)
-     - "Enviar jugada → Cargar tipos" dentro del modal Nueva Jugada (jugadas.js)
-     - "Enviar jugada → Generar numerólogo (tendencia)" (jugadas.js)
-     - "Enviar jugada → Numerologitos" (jugadas.js)
-
-   TODOS los parámetros de estas 3 últimas estrategias (más "Numerólogo por
-   tipo de jugada", que comparten "Números" y "Cargar tipos") se leen de
-   Firestore: `sistema_config/generacion_app`. La vista "Configuración"
-   (configuracion.js) es la única que los EDITA; el resto del app los usa
-   en modo lectura, siempre en tiempo real (onSnapshot), cada una con su
-   PROPIA sección de configuración porque cada estrategia funciona distinto.
+   Motor ÚNICO y COMPARTIDO para generar números del Numerólogo.
+   ...
+   🆕 Ahora respeta un "rango histórico" configurable (todo el historial,
+   últimos 3/2/1 meses, últimos 15 días) guardado en cada sección de
+   GEN_CONFIG (rangoHistorico). Depende de recortarHistorialPorRango()
+   (definida en utils.js/loterias.js, ver mensaje anterior).
    ====================================================================== */
 
 const COL_SISTEMA_CONFIG = 'sistema_config';
@@ -29,13 +20,7 @@ const GEN_ESTRATEGIAS = [
   { id:'mixto_descuenta',          label:'Mixto quitando último sorteo' },
 ];
 
-/* Valores por defecto de las 3 secciones configurables. Se usan mientras
-   llega el primer snapshot de Firestore, y como base para "Restaurar
-   valores por defecto" en Configuración. */
 const GEN_CONFIG_DEFAULT = {
-  // Usado por "Números → Numerólogo" Y por "Enviar jugada → Cargar tipos"
-  // (ambos generan por TIPO de jugada: Quiniela/Palé/Tripleta/Ganar 85%,
-  // o el tipo único de KINO/LOTOMAS/LOTO_REAL/LOTO_POOL).
   numerologo: {
     estrategias: ['descuenta_ultimos_sorteo'],
     tendencia: true,
@@ -43,31 +28,29 @@ const GEN_CONFIG_DEFAULT = {
     exclusion: true,
     exclusionCantidad: 5,
     exclusionPosiciones: [0, 1],
-    cantidadGanar85: 30, // 30 a 50
+    cantidadGanar85: 30,
     martingalaActiva: true,
-    martingalaNivelMaximo: 4, // 1 a 10
+    martingalaNivelMaximo: 4,
+    rangoHistorico: 'todo', // 🆕 'todo' | '3m' | '2m' | '1m' | '15d'
   },
-  // "Enviar jugada → Generar numerólogo (tendencia)"
   numerologoTendencia: {
-    sorteosTendencia: 3,     // 1 a 15
-    cantidadObjetivo: 40,    // 20 a 60
+    sorteosTendencia: 3,
+    cantidadObjetivo: 40,
     martingalaActiva: true,
-    martingalaNivelMaximo: 4, // 1 a 10
+    martingalaNivelMaximo: 4,
+    rangoHistorico: 'todo', // 🆕
   },
-  // "Enviar jugada → Numerologitos"
   numerologitos: {
-    sorteosExclusion: 10,    // 1 a 20
-    cantidadObjetivo: 20,    // 10 a 40
+    sorteosExclusion: 10,
+    cantidadObjetivo: 20,
     martingalaActiva: true,
-    martingalaNivelMaximo: 4, // 1 a 10
+    martingalaNivelMaximo: 4,
+    rangoHistorico: 'todo', // 🆕
   },
 };
 
-/* Config activa en memoria, actualizada en tiempo real. Arranca en los
-   valores por defecto por si algún componente genera antes de que llegue
-   el primer snapshot de Firestore. */
 let GEN_CONFIG = JSON.parse(JSON.stringify(GEN_CONFIG_DEFAULT));
-let GEN_CONFIG_LISTENERS = [];   // callbacks a avisar cuando cambia la config
+let GEN_CONFIG_LISTENERS = [];
 let GEN_CONFIG_UNSUB = null;
 
 function genMezclarConDefault(datos){
@@ -79,9 +62,6 @@ function genMezclarConDefault(datos){
   };
 }
 
-/* Escucha en tiempo real `sistema_config/generacion_app`. Se puede llamar
-   varias veces (cada vista que la necesite) sin problema: solo arma UN
-   listener real y despacha a todos los callbacks registrados. */
 function genEscucharConfig(callback){
   if(callback) GEN_CONFIG_LISTENERS.push(callback);
   if(GEN_CONFIG_UNSUB) { if(callback) callback(GEN_CONFIG); return; }
@@ -95,9 +75,6 @@ function genEscucharConfig(callback){
     });
 }
 
-/* Guarda (merge) una sección de la configuración. Usado solo desde
-   Configuración. Si el documento no existe todavía, lo crea con los
-   valores por defecto de las OTRAS secciones para no dejarlas vacías. */
 async function genGuardarSeccionConfig(seccion, datos){
   const payload = {};
   payload[seccion] = datos;
@@ -108,8 +85,6 @@ async function genRestaurarConfigPorDefecto(){
   await db.collection(COL_SISTEMA_CONFIG).doc(DOC_GENERACION_APP).set(GEN_CONFIG_DEFAULT, { merge:false });
 }
 
-/* Igual que categoria_loteria() en main.py, para saber si es una lotería
-   de un solo tipo especial (kino/lotomas/loto_real/loto_pool) o general. */
 function genCategoriaLoteria(nombre){
   const n = (nombre || '').toLowerCase();
   const ALIASES = {
@@ -123,31 +98,34 @@ function genCategoriaLoteria(nombre){
 }
 
 /* ------------------------------------------------------------------
-   HISTORIAL: lee `loterias/{loteria}/resultados` (lo que main.py fue
-   escalpeando tal cual) y lo cachea en memoria, ordenado del sorteo más
-   antiguo al más reciente (clave para la ponderación por recencia). */
-const GEN_HISTORIAL_CACHE = {};
-async function genCargarHistorialAsc(loteria){
-  if(GEN_HISTORIAL_CACHE[loteria]) return GEN_HISTORIAL_CACHE[loteria];
+   🆕 HISTORIAL CON FECHAS: esta es ahora la fuente de verdad. Se
+   cachea CON fecha para poder recortar por rango histórico. La versión
+   "solo números" (genCargarHistorialAsc) se mantiene por compatibilidad
+   con quien ya la use, pero internamente deriva de esta. */
+const GEN_HISTORIAL_FECHAS_CACHE = {};
+async function genCargarHistorialConFechasAsc(loteria){
+  if(GEN_HISTORIAL_FECHAS_CACHE[loteria]) return GEN_HISTORIAL_FECHAS_CACHE[loteria];
   const snap = await db.collection('loterias').doc(loteria).collection('resultados').get();
   const filas = [];
   snap.docs.forEach(doc=>{
     const numeros = doc.data().numeros;
-    if(Array.isArray(numeros) && numeros.length) filas.push([doc.id, numeros]);
+    if(Array.isArray(numeros) && numeros.length) filas.push({ fecha: doc.id, numeros });
   });
-  filas.sort((a,b)=> a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0));
-  const historial = filas.map(f=>f[1]);
-  GEN_HISTORIAL_CACHE[loteria] = historial;
-  return historial;
+  filas.sort((a,b)=> a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0));
+  GEN_HISTORIAL_FECHAS_CACHE[loteria] = filas;
+  return filas;
+}
+async function genCargarHistorialAsc(loteria){
+  const conFechas = await genCargarHistorialConFechasAsc(loteria);
+  return conFechas.map(f=>f.numeros);
 }
 function genLimpiarCacheHistorial(loteria){
-  if(loteria) delete GEN_HISTORIAL_CACHE[loteria];
-  else Object.keys(GEN_HISTORIAL_CACHE).forEach(k=>delete GEN_HISTORIAL_CACHE[k]);
+  if(loteria){ delete GEN_HISTORIAL_FECHAS_CACHE[loteria]; }
+  else { Object.keys(GEN_HISTORIAL_FECHAS_CACHE).forEach(k=>delete GEN_HISTORIAL_FECHAS_CACHE[k]); }
 }
 
 /* ============================================================
-   ALGORITMO INTELIGENTE DE PONDERACIÓN (frecuencia ponderada por
-   recencia + atraso + consistencia) — equivalente al que usaba main.py.
+   ALGORITMO INTELIGENTE DE PONDERACIÓN — SIN CAMBIOS
    ============================================================ */
 function genCalcularPuntuaciones(historial){
   if(!historial.length) return {};
@@ -299,10 +277,10 @@ function genGenerarPoolPorEstrategia(historial, estrategia, cantidad, universo, 
 }
 
 /* ============================================================
-   TENDENCIA / LADO GANADOR (alto/bajo)
+   TENDENCIA / LADO GANADOR — SIN CAMBIOS
    ============================================================ */
-const GEN_UNIVERSO_BAJO = Array.from({length:49}, (_,i)=>i+1);              // 1..49
-const GEN_UNIVERSO_ALTO = Array.from({length:50}, (_,i)=>i+50).concat([0]); // 50..99 y el 0 (=100)
+const GEN_UNIVERSO_BAJO = Array.from({length:49}, (_,i)=>i+1);
+const GEN_UNIVERSO_ALTO = Array.from({length:50}, (_,i)=>i+50).concat([0]);
 
 function genLadoDe(n){ if(n === 0) return 'alto'; return n >= 50 ? 'alto' : 'bajo'; }
 
@@ -315,11 +293,6 @@ function genDeterminarLadoGanador(historial, dias){
   return altos >= bajos ? 'alto' : 'bajo';
 }
 
-/* Exclusión dinámica del lado ganador: recorre los sorteos más recientes
-   (hasta `maxSorteos` hacia atrás) tomando, sorteo por sorteo, las
-   posiciones elegidas (1ra/2da/3ra), y va excluyendo del universo del
-   lado ganador cada número que aparezca ahí — hasta juntar exactamente
-   (universo.length - total) exclusiones, o hasta agotar `maxSorteos`. */
 function genExcluirRecientesDelLado(historial, universo, total, posiciones, maxSorteos){
   const objetivo = Math.max(0, universo.length - total);
   const universoSet = new Set(universo);
@@ -347,15 +320,6 @@ function genConstruirPoolTotal(historial, lado, total, posiciones, maxSorteos){
   return poolRestante;
 }
 
-/* ============================================================
-   COMBINAR VARIAS ESTRATEGIAS SELECCIONADAS EN UN SOLO POOL
-   Cada estrategia MARCADA aporta su propia parte del pool final
-   (basePoolSize repartido en partes iguales entre las estrategias
-   seleccionadas), en vez de ir alternando número a número entre todas
-   ("por turno"). Así el resultado refleja de verdad a cada filtro
-   elegido —con su propio bloque de números dentro del pool— y no una
-   mezcla intercalada donde un filtro le "roba" turnos a otro.
-   ============================================================ */
 function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
   const { tendencia, sorteosTendencia, exclusion, exclusionCantidad, exclusionPosiciones, universoBase } = opts;
 
@@ -379,9 +343,6 @@ function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
     return genGenerarPoolPorEstrategia(historial, est, basePoolSize, universoEstrategia);
   });
 
-  // Reparto por partes iguales: cada estrategia seleccionada llena su
-  // propio cupo (los primeros cupos, si sobran unidades por la división,
-  // se le dan a las primeras estrategias elegidas).
   const combinado = [];
   const vistos = new Set();
   const n = poolsPorEstrategia.length;
@@ -399,9 +360,6 @@ function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
     }
   });
 
-  // Si alguna estrategia se quedó corta con su cupo (pool chico o muchos
-  // duplicados entre estrategias), se completa primero con lo que sobre
-  // de las mismas pools ya calculadas...
   if(combinado.length < basePoolSize){
     for(const pool of poolsPorEstrategia){
       for(const num of pool){
@@ -412,7 +370,6 @@ function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
     }
   }
 
-  // Y si aún falta, con el resto del universo (barajado), igual que antes.
   if(combinado.length < basePoolSize){
     const restante = genBarajar(genUniversoDesdeHistorial(historial, universoEstrategia).filter(n=>!vistos.has(n)));
     for(const n of restante){
@@ -425,12 +382,12 @@ function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
 }
 
 /* ============================================================
-   LOTOMAS — caso especial (6 números base + "Más" + "Súper Más")
+   LOTOMAS — SIN CAMBIOS
    ============================================================ */
 function genGenerarLotomas(historial, cantidadLoto, estrategias, opts){
   const primerosSeis = historial.filter(s=>s.length >= 6).map(s=>s.slice(0,6));
   const planos = primerosSeis.flat();
-  const pseudoHistorial = [planos]; // un solo "día" con todos los números juntos
+  const pseudoHistorial = [planos];
 
   const { pool } = genCombinarEstrategias(pseudoHistorial, estrategias, cantidadLoto, {
     ...opts, tendencia:false, universoBase: genUniversoDesdeHistorial(pseudoHistorial, null),
@@ -452,15 +409,26 @@ function genGenerarLotomas(historial, cantidadLoto, estrategias, opts){
 }
 
 /* ============================================================
-   FUNCIÓN PRINCIPAL: genera los números de UN tipo de jugada de UNA
-   lotería, usando la sección "numerologo" de la configuración. La usan
-   tanto "Números → Numerólogo" como "Enviar jugada → Cargar tipos".
+   🆕 FUNCIÓN PRINCIPAL — ahora recorta el historial según
+   cfg.rangoHistorico ANTES de generar cualquier pool. Todo lo demás
+   (kino, lotomas, loto_real/pool, quinielas) sigue exactamente igual,
+   solo que trabaja sobre `historial` ya recortado en vez del completo.
    ============================================================ */
 async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
-  const historial = await genCargarHistorialAsc(loteria);
-  if(!historial.length) return { numeros:[], lado:null, sinHistorial:true };
+  const historialConFechas = await genCargarHistorialConFechasAsc(loteria);
+  if(!historialConFechas.length) return { numeros:[], lado:null, sinHistorial:true };
 
   const cfg = GEN_CONFIG.numerologo;
+
+  // 🆕 Recorte por rango histórico configurado (todo/3m/2m/1m/15d).
+  // recortarHistorialPorRango() viene de utils.js/loterias.js.
+  const historialRecortadoConFechas = (typeof recortarHistorialPorRango === 'function')
+    ? recortarHistorialPorRango(historialConFechas, cfg.rangoHistorico, null)
+    : historialConFechas;
+  const historial = historialRecortadoConFechas.map(f=>f.numeros);
+
+  if(!historial.length) return { numeros:[], lado:null, sinHistorial:true };
+
   const cat = genCategoriaLoteria(loteria);
   const esUnica = cat !== 'general';
 
@@ -482,8 +450,6 @@ async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
     return { numeros: pool.slice(0, cantidad).sort((a,b)=>a-b), lado:null, sinHistorial:false };
   }
 
-  // Loterías generales (quinielas): un pool "base" (Ganar 85% seguro) del
-  // que se derivan de forma coherente Tripleta/Palé/Quiniela.
   const cantidadGanar85 = cantidadGanar85Override || cfg.cantidadGanar85 || 30;
   const basePoolSize = tipo === 'GANAR 85% SEGURO' ? cantidadGanar85 : Math.max(cantidadGanar85, NUM_CANTIDAD_DEFAULT[tipo] || 1);
   const universoBase = Array.from({length:100}, (_,i)=>i);
@@ -495,7 +461,6 @@ async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
   return { numeros: pool.slice(0, cantidadFinal).sort((a,b)=>a-b), lado, sinHistorial:false };
 }
 
-/* Cantidades por defecto de cada tipo de jugada. */
 const NUM_CANTIDAD_DEFAULT = {
   'QUINIELA': 1,
   'PALE': 2,
@@ -507,7 +472,4 @@ const NUM_CANTIDAD_DEFAULT = {
   'LOTOMAS': 6,
 };
 
-// Arranca el listener en tiempo real en cuanto carga este script, para que
-// GEN_CONFIG ya esté actualizado (no solo con los valores por defecto)
-// desde el primer momento en que cualquier vista lo necesite.
 genEscucharConfig();
