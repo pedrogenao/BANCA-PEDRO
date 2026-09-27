@@ -1,31 +1,32 @@
 /* ========================================================================
    SIMULACION.JS
    Admin: "Simulación" — corre un backtest histórico de martingala sobre
-   los resultados oficiales REALES guardados en Firestore (mismos que usa
-   el resto de la app), usando exactamente el mismo motor de generación de
-   números (generador-numeros.js / jugadas.js) y la misma matemática de
-   martingala que "Enviar jugada" (calcularSugerenciaMontoLoteria en
-   jugadas.js), pero corrida día por día desde una fecha de partida hasta
-   hoy, sobre UNA sola lotería/tipo/estrategia elegidos por el admin.
+   los resultados oficiales REALES guardados en Firestore, usando
+   exactamente el mismo motor de generación de números y la misma
+   matemática de martingala que "Enviar jugada", corrida día por día
+   desde una fecha de partida hasta hoy, sobre UNA sola lotería/tipo/
+   estrategia elegidos por el admin.
 
-   REGLA DE ORO (para que sea lo más real posible): para generar los
-   números del sorteo de un día X, SOLO se usa el historial de resultados
-   con fecha ANTERIOR a X — nunca el resultado del propio día X ni de
-   días futuros. Así la simulación nunca "hace trampa" mirando el futuro.
-   ====================================================================== */
+   🆕 Ahora respeta el "rango histórico" configurado en Configuración
+   para la estrategia elegida (todo/3m/2m/1m/15d), y agrega dos funciones
+   nuevas (simEvaluarEstadoActual / simFiltrarLoteriasPorEstado) que
+   reutiliza "Nueva jugada" para el pre-filtro automático de loterías.
 
-/* ======================================================================
-   1) FORM: lotería, tipo de jugada, estrategia, fecha de partida, inversión
+   REGLA DE ORO: para generar los números del sorteo de un día X, SOLO
+   se usa el historial de resultados con fecha ANTERIOR a X.
    ====================================================================== */
 let SIM_TIPO = 'QUINIELA';
 let SIM_ESTRATEGIA = 'numerologo';
+
+// 🆕 Mapea el id de estrategia usado en Simulación/Nueva-jugada a la
+// clave real de GEN_CONFIG donde vive su configuración (incluido el
+// rangoHistorico).
+const SIM_ESTRATEGIA_A_CFG = { numerologo:'numerologo', tendencia:'numerologoTendencia', numerologitos:'numerologitos' };
 
 function poblarSelectSimLoterias(){
   const sel = document.getElementById('simLoteria');
   if(!sel) return;
   const anterior = sel.value;
-  // Solo loterías "más de una jugada" (quinielas: Quiniela/Palé/Tripleta/Ganar 85%),
-  // igual que pide el admin — las de un solo tipo (KINO/LOTOMAS/...) no aplican aquí.
   const lista = filtrarLoteriasPorTipo(listaLoteriasOrdenadas(), 'multiple');
   sel.innerHTML = lista.length
     ? construirOptionsLoterias(lista, 'multiple')
@@ -40,7 +41,6 @@ function abrirVistaSimulacion(){
   if(fechaInput){
     fechaInput.max = hoyStr();
     if(!fechaInput.value){
-      // Por defecto, un mes atrás hasta hoy.
       const d = new Date();
       d.setMonth(d.getMonth() - 1);
       fechaInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -48,7 +48,6 @@ function abrirVistaSimulacion(){
   }
 }
 
-// Chips de tipo de jugada (selección única)
 document.getElementById('simTipoChips')?.addEventListener('click', (e)=>{
   const chip = e.target.closest('.filter-tab');
   if(!chip) return;
@@ -58,7 +57,6 @@ document.getElementById('simTipoChips')?.addEventListener('click', (e)=>{
   document.getElementById('simGanar85Wrap').style.display = (SIM_TIPO === 'GANAR 85% SEGURO') ? '' : 'none';
 });
 
-// Chips de estrategia (selección única — solo se puede simular con UNA estrategia a la vez)
 document.getElementById('simEstrategiaChips')?.addEventListener('click', (e)=>{
   const chip = e.target.closest('.filter-tab');
   if(!chip) return;
@@ -67,19 +65,14 @@ document.getElementById('simEstrategiaChips')?.addEventListener('click', (e)=>{
   SIM_ESTRATEGIA = chip.dataset.estrategia;
 });
 
-// Switch de Martingala activa/desactivada — si se desactiva, no tiene sentido pedir el nivel máximo.
 document.getElementById('simMartingalaCheck')?.addEventListener('change', (e)=>{
   document.getElementById('simMartingalaSwitch').classList.toggle('on', e.target.checked);
   document.getElementById('simMartingalaNivelWrap').style.display = e.target.checked ? '' : 'none';
 });
-// Estado inicial del switch (checked por defecto en el HTML)
 document.getElementById('simMartingalaSwitch')?.classList.toggle('on', !!document.getElementById('simMartingalaCheck')?.checked);
 
 /* ======================================================================
    2) HISTORIAL: trae TODO el historial oficial de la lotería elegida
-   (loterias/{loteria}/resultados), tal cual lo escalpeó main.py — el
-   mismo dato fuente que usa el resto de la app — y lo deja ordenado
-   cronológicamente (más antiguo primero) con su fecha.
    ====================================================================== */
 async function simCargarHistorialConFechas(loteria){
   const snap = await db.collection('loterias').doc(loteria).collection('resultados').get();
@@ -93,19 +86,8 @@ async function simCargarHistorialConFechas(loteria){
 }
 
 /* ======================================================================
-   3) GENERACIÓN DE NÚMEROS POR ESTRATEGIA — clones "conscientes de la
-   fecha" de los mismos generadores que usa "Enviar jugada", para poder
-   pasarles SOLO el historial anterior al día que se está simulando (los
-   generadores originales de generador-numeros.js/jugadas.js siempre usan
-   el historial COMPLETO más reciente, porque en la app real nunca hace
-   falta "viajar en el tiempo" — acá sí, así que se reimplementa el mismo
-   algoritmo tal cual, recibiendo el historial ya recortado).
+   3) GENERACIÓN DE NÚMEROS POR ESTRATEGIA
    ====================================================================== */
-
-// "Cargar tipos" (Numerólogo) — mismo algoritmo que la rama "loterías
-// generales" de genNumerosParaTipo() en generador-numeros.js, usando la
-// configuración VIGENTE (GEN_CONFIG.numerologo) tal cual la deja el admin
-// en Configuración → Numerólogo.
 function simNumerologoCargarTipos(historialAscNumeros, tipo, cantidadOverride){
   if(!historialAscNumeros.length) return null;
   const cfg = GEN_CONFIG.numerologo;
@@ -121,18 +103,6 @@ function simNumerologoCargarTipos(historialAscNumeros, tipo, cantidadOverride){
   return numeros.length ? numeros : null;
 }
 
-/* Para "Generar numerólogo (tendencia)" y "Numerologitos" se reutilizan
-   TAL CUAL las funciones ya existentes en jugadas.js
-   (generarNumerosNumerologoDeTendencia / generarNumerosNumerologuitos):
-   ambas ya reciben el historial como parámetro (no lo buscan ellas
-   mismas), así que basta con pasarles el historial recortado a la fecha
-   que se está simulando, en el mismo formato que ya usan
-   ([{fecha,numeros}, ...] del más reciente al más antiguo).
-   Como estas dos reparten los números entre "jugadores marcados" en el
-   flujo real (uno para cada uno, por turnos), y acá hay un solo
-   "jugador" simulado, se recorta el pool generado a la cantidad que
-   corresponde al tipo de jugada elegido (1/2/3/Ganar85), tomando los
-   primeros de la lista (el orden en que esas funciones ya los dejan). */
 function simCantidadParaTipo(tipo, cantidadGanar85){
   if(tipo === 'QUINIELA') return 1;
   if(tipo === 'PALE') return 2;
@@ -142,14 +112,15 @@ function simCantidadParaTipo(tipo, cantidadGanar85){
 }
 
 /* Genera los números del día según la estrategia elegida. `historialAsc`
-   viene SIEMPRE recortado (solo fechas anteriores al día que se juega). */
+   viene SIEMPRE recortado (solo fechas anteriores al día que se juega,
+   y ya con el rango histórico aplicado por quien llama a esta función). */
 function simGenerarNumerosDelDia(historialAsc, estrategia, tipo, cantidadGanar85){
   if(!historialAsc.length) return null;
   if(estrategia === 'numerologo'){
     const cantidadOverride = tipo === 'GANAR 85% SEGURO' ? cantidadGanar85 : undefined;
     return simNumerologoCargarTipos(historialAsc.map(d=>d.numeros), tipo, cantidadOverride);
   }
-  const historialDesc = historialAsc.slice().reverse(); // más reciente primero, formato que esperan estas 2 funciones
+  const historialDesc = historialAsc.slice().reverse();
   const cantidad = simCantidadParaTipo(tipo, cantidadGanar85);
   let resultado = null;
   if(estrategia === 'tendencia') resultado = generarNumerosNumerologoDeTendencia(historialDesc);
@@ -161,24 +132,11 @@ function simGenerarNumerosDelDia(historialAsc, estrategia, tipo, cantidadGanar85
 
 /* ======================================================================
    4) MARTINGALA — misma matemática EXACTA que calcularSugerenciaMontoLoteria
-   en jugadas.js (mismas constantes: nivel máximo 4, monto mínimo RD$3,
-   objetivo 1er lugar x60, margen de ganancia 15%, base RD$5), pero
-   llevada hacia ADELANTE día por día (en vez de escanear jugadas ya
-   guardadas hacia atrás, que es como lo hace la app en vivo) — el
-   resultado matemático es idéntico, solo cambia la dirección del cálculo
-   porque acá se conoce de antemano toda la secuencia de sorteos.
    ====================================================================== */
 const SIM_MONTO_MINIMO = 3;
-const SIM_MULTIPLICADOR_OBJETIVO = MULTIPLICADOR_PREMIO[0]; // x60 (1er lugar)
+const SIM_MULTIPLICADOR_OBJETIVO = MULTIPLICADOR_PREMIO[0];
 const SIM_MARGEN_GANANCIA = 0.15;
 
-/* Calcula el monto por número de la PRÓXIMA apuesta según el estado
-   actual de la racha (perdidaAcumulada + cuántas pérdidas consecutivas
-   ya lleva). Devuelve { monto, nivel, advertencia }.
-   `montoBase` es la inversión inicial por número (Nivel 1, sin racha
-   activa) que el admin elige en el formulario (RD$1 a RD$100).
-   Si `martingalaActiva` es false, siempre apuesta el monto base, plano,
-   sin escalar aunque se venga perdiendo (nivel se reporta siempre 1). */
 function simCalcularMontoPorNumero(estado, cantidadNumeros, martingalaActiva, nivelMaximo, montoBase){
   if(!martingalaActiva || estado.nivelActual === 0){
     return { monto: montoBase, nivel: 1 };
@@ -198,10 +156,6 @@ function simCalcularMontoPorNumero(estado, cantidadNumeros, martingalaActiva, ni
   return { monto, nivel, advertencia };
 }
 
-/* Calcula lo ganado (premio bruto) de una jugada simulada contra el
-   resultado oficial del día, con la MISMA regla que calcularAciertosJugada
-   en resultados-engine.js (1ra x60, 2da x14, 3ra x4; un mismo número
-   puede acertar en más de una posición). */
 function simCalcularGananciaBruta(numerosJugados, montoPorNumero, numerosResultado){
   let monto = 0;
   const detalle = [];
@@ -219,7 +173,9 @@ function simCalcularGananciaBruta(numerosJugados, montoPorNumero, numerosResulta
 }
 
 /* ======================================================================
-   5) MOTOR PRINCIPAL DE LA SIMULACIÓN
+   5) MOTOR PRINCIPAL DE LA SIMULACIÓN (vista "Simulación", detallada)
+   🆕 Recorta historialAntes por el rango histórico configurado para la
+   estrategia elegida (GEN_CONFIG[cfg correspondiente].rangoHistorico).
    ====================================================================== */
 async function simEjecutar(){
   if(!esAdmin()) return;
@@ -245,8 +201,12 @@ async function simEjecutar(){
   estadoEl.textContent = 'Cargando historial de resultados oficiales...';
   document.getElementById('simResultadosWrap').style.display = 'none';
 
+  // 🆕 Rango histórico configurado para la estrategia elegida
+  const cfgKeySim = SIM_ESTRATEGIA_A_CFG[SIM_ESTRATEGIA] || 'numerologo';
+  const rangoSim = GEN_CONFIG[cfgKeySim]?.rangoHistorico || 'todo';
+
   try{
-    const historialCompleto = await simCargarHistorialConFechas(loteria); // asc, [{fecha,numeros}]
+    const historialCompleto = await simCargarHistorialConFechas(loteria);
     const indicePorFecha = new Map(historialCompleto.map((d, i)=>[d.fecha, i]));
     const diasARecorrer = historialCompleto.filter(d => d.fecha >= fechaPartida && d.fecha <= hoy);
 
@@ -258,8 +218,8 @@ async function simEjecutar(){
     estadoEl.textContent = `Simulando ${diasARecorrer.length} sorteo(s)...`;
 
     let saldo = inversion;
-    let perdidaMaxima = 0;   // mayor caída respecto a la inversión de partida (se guarda positivo)
-    let gananciaMaxima = 0;  // mayor pico respecto a la inversión de partida
+    let perdidaMaxima = 0;
+    let gananciaMaxima = 0;
     let maxNivelAlcanzado = 0;
     let sorteosJugados = 0;
     let sorteosSaltados = 0;
@@ -267,14 +227,14 @@ async function simEjecutar(){
     let fechaQuiebra = null;
     const filas = [];
 
-    // Estado de la martingala (racha de pérdidas consecutivas activa)
     let estado = { nivelActual: 0, perdidaAcumulada: 0 };
 
     for(const dia of diasARecorrer){
       const idx = indicePorFecha.get(dia.fecha);
-      const historialAntes = historialCompleto.slice(0, idx); // SOLO fechas anteriores a este sorteo
+      let historialAntes = historialCompleto.slice(0, idx); // SOLO fechas anteriores a este sorteo
+      historialAntes = recortarHistorialPorRango(historialAntes, rangoSim, dia.fecha); // 🆕
 
-      if(historialAntes.length === 0){ sorteosSaltados++; continue; } // sin historial previo todavía: no se puede generar nada
+      if(historialAntes.length === 0){ sorteosSaltados++; continue; }
 
       const numerosJugados = simGenerarNumerosDelDia(historialAntes, SIM_ESTRATEGIA, SIM_TIPO, cantidadGanar85);
       if(!numerosJugados || numerosJugados.length === 0){ sorteosSaltados++; continue; }
@@ -284,7 +244,6 @@ async function simEjecutar(){
       const invertido = sugerencia.monto * cantidadNumeros;
 
       if(invertido > saldo){
-        // La banca no alcanza para cubrir la próxima apuesta: se detiene la simulación aquí.
         quiebra = true;
         fechaQuiebra = dia.fecha;
         break;
@@ -307,15 +266,11 @@ async function simEjecutar(){
         ganado: gananciaBruta, saldo,
       });
 
-      // Actualiza el estado de la racha para la PRÓXIMA apuesta —
-      // idéntico criterio que calcularSugerenciaMontoLoteria en jugadas.js.
       if(!martingalaActiva || perdidaNeta <= 0){
-        estado = { nivelActual: 0, perdidaAcumulada: 0 }; // ganó (o tablas), o martingala apagada: racha reiniciada
+        estado = { nivelActual: 0, perdidaAcumulada: 0 };
       } else {
         const nuevoNivel = estado.nivelActual + 1;
         if(nuevoNivel > nivelMaximo){
-          // Se pasó del nivel máximo configurado: se corta la escalada (igual que en la app real)
-          // y la próxima apuesta vuelve a Nivel 1, sin arrastrar la deuda para el tamaño de apuesta.
           estado = { nivelActual: 0, perdidaAcumulada: 0 };
         } else {
           estado = { nivelActual: nuevoNivel, perdidaAcumulada: estado.perdidaAcumulada + perdidaNeta };
@@ -342,7 +297,75 @@ async function simEjecutar(){
 document.getElementById('btnSimular')?.addEventListener('click', simEjecutar);
 
 /* ======================================================================
-   6) RENDER DE RESULTADOS
+   🆕 6) EVALUACIÓN RÁPIDA DE ESTADO ACTUAL (para el pre-filtro de
+   loterías en "Nueva jugada") — corre el mismo motor que simEjecutar
+   pero SOLO trackeando la racha (nivel de martingala y si el último
+   sorteo resuelto ganó o perdió), sin saldo ni tabla de detalle. Usa
+   TODO el historial disponible de cada lotería (desde el 2do sorteo
+   hasta ayer), recortado por el rango histórico configurado.
+   ====================================================================== */
+async function simEvaluarEstadoActual({ loteria, tipo, estrategia, cantidadGanar85, rango, martingalaActiva, nivelMaximo, montoBase }){
+  const historialCompleto = await simCargarHistorialConFechas(loteria);
+  const hoy = hoyStr();
+  let estado = { nivelActual: 0, perdidaAcumulada: 0 };
+  let ultimoGano = null, sorteosSimulados = 0;
+
+  for(let idx = 1; idx < historialCompleto.length; idx++){
+    const dia = historialCompleto[idx];
+    if(dia.fecha >= hoy) break; // nunca mirar hoy ni el futuro
+
+    let historialAntes = historialCompleto.slice(0, idx);
+    historialAntes = recortarHistorialPorRango(historialAntes, rango, dia.fecha);
+    if(historialAntes.length === 0) continue;
+
+    const numerosJugados = simGenerarNumerosDelDia(historialAntes, estrategia, tipo, cantidadGanar85);
+    if(!numerosJugados || numerosJugados.length === 0) continue;
+
+    const sugerencia = simCalcularMontoPorNumero(estado, numerosJugados.length, martingalaActiva, nivelMaximo, montoBase);
+    const { monto: gananciaBruta } = simCalcularGananciaBruta(numerosJugados, sugerencia.monto, dia.numeros);
+    const perdidaNeta = (sugerencia.monto * numerosJugados.length) - gananciaBruta;
+
+    ultimoGano = perdidaNeta <= 0;
+    sorteosSimulados++;
+
+    if(!martingalaActiva || perdidaNeta <= 0){
+      estado = { nivelActual: 0, perdidaAcumulada: 0 };
+    } else {
+      const nuevoNivel = estado.nivelActual + 1;
+      estado = nuevoNivel > nivelMaximo
+        ? { nivelActual: 0, perdidaAcumulada: 0 }
+        : { nivelActual: nuevoNivel, perdidaAcumulada: estado.perdidaAcumulada + perdidaNeta };
+    }
+  }
+  return { loteria, nivelActual: estado.nivelActual, gano: ultimoGano, sorteosSimulados };
+}
+
+/* 🆕 Evalúa TODAS las loterías "de más de una jugada" en paralelo y
+   devuelve solo los nombres que pasan el filtro elegido:
+     - 'ganadoras'  -> el último sorteo resuelto de esa lotería ganó (racha limpia)
+     - 'perdedoras' -> el último sorteo resuelto perdió (racha activa)
+     - 'nivelAlto'  -> están en el nivel de martingala más alto de todo el grupo
+     - 'todas'      -> cualquier lotería con al menos un sorteo simulable
+   Loterías sin ningún sorteo simulable (historial insuficiente) quedan
+   fuera de cualquier filtro. */
+async function simFiltrarLoteriasPorEstado({ tipo, estrategia, filtro, rango, cantidadGanar85, martingalaActiva, nivelMaximo, montoBase }){
+  const candidatas = filtrarLoteriasPorTipo(listaLoteriasOrdenadas(), 'multiple');
+  const evaluaciones = await Promise.all(candidatas.map(loteria =>
+    simEvaluarEstadoActual({ loteria, tipo, estrategia, cantidadGanar85, rango, martingalaActiva, nivelMaximo, montoBase })
+  ));
+  const conDatos = evaluaciones.filter(e => e.sorteosSimulados > 0);
+
+  if(filtro === 'ganadoras')  return conDatos.filter(e => e.gano === true).map(e => e.loteria);
+  if(filtro === 'perdedoras') return conDatos.filter(e => e.gano === false).map(e => e.loteria);
+  if(filtro === 'nivelAlto'){
+    const maxNivel = Math.max(0, ...conDatos.map(e => e.nivelActual));
+    return maxNivel === 0 ? [] : conDatos.filter(e => e.nivelActual === maxNivel).map(e => e.loteria);
+  }
+  return conDatos.map(e => e.loteria); // 'todas'
+}
+
+/* ======================================================================
+   7) RENDER DE RESULTADOS (vista "Simulación")
    ====================================================================== */
 function simRenderResultados(r){
   const wrap = document.getElementById('simResultadosWrap');
@@ -389,7 +412,6 @@ function simRenderResultados(r){
     return;
   }
 
-  // Más recientes primero, igual que el resto de las tablas de detalle de la app
   const filasOrden = r.filas.slice().reverse();
 
   tbody.innerHTML = filasOrden.map(f=>{
