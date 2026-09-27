@@ -6,18 +6,14 @@
         Enviar jugada→Cargar tipos.
      3) Generar numerólogo (tendencia) — usado por Enviar jugada.
      4) Numerologitos — usado por Enviar jugada.
-   Las secciones 2/3/4 editan `sistema_config/generacion_app` (ver
-   js/generador-numeros.js), que el resto de la app lee en tiempo real.
+   🆕 Cada una de las 3 secciones ahora incluye un selector de "Rango de
+   historial" (todo/3m/2m/1m/15d) que se guarda como rangoHistorico.
    ======================================================================== */
 
 const COL_CONFIG_GENERACION = 'sistema_config';
 const DOC_ESTADO_SCRIPT = 'estado_script';
 
-/* Cada cuánto se considera "vencido" el latido del script. main.py late
-   cada 45s (LATIDO_INTERVALO_SEGUNDOS); si pasan más de este umbral sin
-   noticias, se muestra "Desconectado" aunque el último dato en Firestore
-   diga online:true (el script pudo haberse caído sin avisar). */
-const CFG_ESTADO_UMBRAL_MS = 2 * 60 * 1000; // 2 minutos
+const CFG_ESTADO_UMBRAL_MS = 2 * 60 * 1000;
 
 let CFG_ESTADO_UNSUB = null;
 let CFG_ESTADO_INTERVAL = null;
@@ -85,12 +81,9 @@ function cfgIniciarListenerEstadoScript(){
    ======================================================================== */
 let CFG_NUM_ESTRATEGIAS_SEL = [];
 let CFG_NUM_POSICIONES_SEL = [];
+let CFG_NUM_RANGO_SEL = 'todo'; // 🆕
 let CFG_NUM_INICIALIZADO = false;
 
-/* "Descuenta últimos sorteo" solo tiene sentido (y solo queda disponible
-   para elegir) si el switch "Excluir sorteos recientes del lado ganador"
-   está activo, porque ese filtro usa justamente esa configuración
-   (cantidad de sorteos y posiciones) para armar su pool. */
 function cfgNumExclusionActiva(){
   return document.getElementById('cfgNumExclusionCheck').checked;
 }
@@ -113,16 +106,12 @@ function cfgNumPintarChipsEstrategias(){
       const idx = CFG_NUM_ESTRATEGIAS_SEL.indexOf(id);
       if(idx === -1) CFG_NUM_ESTRATEGIAS_SEL.push(id);
       else CFG_NUM_ESTRATEGIAS_SEL.splice(idx, 1);
-      if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = [id]; // al menos una
+      if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = [id];
       chip.classList.toggle('active', CFG_NUM_ESTRATEGIAS_SEL.includes(id));
     });
   });
 }
 
-/* Si se apaga "Excluir sorteos recientes del lado ganador" y
-   "Descuenta últimos sorteo" estaba seleccionado, se desmarca solo
-   (queda al menos una estrategia activa) y se repintan los chips para
-   que ese filtro se vea deshabilitado. */
 function cfgNumSincronizarDescuentaConExclusion(){
   if(!cfgNumExclusionActiva()){
     const idx = CFG_NUM_ESTRATEGIAS_SEL.indexOf('descuenta_ultimos_sorteo');
@@ -148,13 +137,11 @@ function cfgNumPintarChipsPosiciones(){
   });
 }
 
-/* Rellena el formulario de la sección 1 con lo que haya en GEN_CONFIG.
-   Se llama al abrir la vista y cada vez que llega un cambio remoto (por
-   ejemplo, si dos admins tienen Configuración abierta a la vez). */
 function cfgNumPintarFormulario(){
   const cfg = GEN_CONFIG.numerologo;
   CFG_NUM_ESTRATEGIAS_SEL = (cfg.estrategias || []).slice();
   CFG_NUM_POSICIONES_SEL = (cfg.exclusionPosiciones || []).slice();
+  CFG_NUM_RANGO_SEL = cfg.rangoHistorico || 'todo'; // 🆕
 
   document.getElementById('cfgNumCantidadGanar85').value = cfg.cantidadGanar85;
   document.getElementById('cfgNumTendenciaCheck').checked = !!cfg.tendencia;
@@ -167,16 +154,13 @@ function cfgNumPintarFormulario(){
   document.getElementById('cfgNumExclusionCantidad').value = cfg.exclusionCantidad;
   document.getElementById('cfgNumExclusionOpcionesWrap').style.display = cfg.exclusion ? 'block' : 'none';
 
-  // Si en Firestore quedó guardado "descuenta_ultimos_sorteo" con la
-  // exclusión apagada (config vieja o editada desde otro lado), se limpia
-  // acá antes de pintar los chips para no mostrar un filtro seleccionado
-  // que en realidad no está disponible.
   if(!cfg.exclusion){
     CFG_NUM_ESTRATEGIAS_SEL = CFG_NUM_ESTRATEGIAS_SEL.filter(id=>id !== 'descuenta_ultimos_sorteo');
     if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = ['caliente'];
   }
   cfgNumPintarChipsEstrategias();
   cfgNumPintarChipsPosiciones();
+  inicializarChipsRango('cfgNumRangoChips', CFG_NUM_RANGO_SEL, (r)=>{ CFG_NUM_RANGO_SEL = r; }); // 🆕
 
   document.getElementById('cfgNumMartingalaCheck').checked = cfg.martingalaActiva !== false;
   document.getElementById('cfgNumMartingalaSwitch').classList.toggle('on', cfg.martingalaActiva !== false);
@@ -192,8 +176,6 @@ function cfgNumInicializarListenersFormulario(){
   document.getElementById('cfgNumExclusionCheck').addEventListener('change', e=>{
     document.getElementById('cfgNumExclusionSwitch').classList.toggle('on', e.target.checked);
     document.getElementById('cfgNumExclusionOpcionesWrap').style.display = e.target.checked ? 'block' : 'none';
-    // "Descuenta últimos sorteo" depende de este switch: si se apaga, se
-    // desmarca solo (si estaba elegido) y el chip queda deshabilitado.
     cfgNumSincronizarDescuentaConExclusion();
   });
   document.getElementById('cfgNumMartingalaCheck').addEventListener('change', e=>{
@@ -231,6 +213,7 @@ function cfgNumInicializarListenersFormulario(){
         cantidadGanar85: parseInt(document.getElementById('cfgNumCantidadGanar85').value, 10) || 30,
         martingalaActiva: document.getElementById('cfgNumMartingalaCheck').checked,
         martingalaNivelMaximo: parseInt(document.getElementById('cfgNumMartingalaNivel').value, 10) || 4,
+        rangoHistorico: CFG_NUM_RANGO_SEL, // 🆕
       });
       txt.textContent = 'Guardado ✓';
       toast('Configuración del Numerólogo guardada.', 'success');
@@ -248,6 +231,9 @@ function cfgNumInicializarListenersFormulario(){
 /* ========================================================================
    2) GENERAR NUMERÓLOGO (tendencia) — 3) NUMEROLOGITOS
    ======================================================================== */
+let CFG_TEND_RANGO_SEL = 'todo'; // 🆕
+let CFG_NTO_RANGO_SEL = 'todo';  // 🆕
+
 function cfgPintarFormularioTendenciaYNumerologitos(){
   const t = GEN_CONFIG.numerologoTendencia;
   document.getElementById('cfgTendSorteos').value = t.sorteosTendencia;
@@ -256,6 +242,8 @@ function cfgPintarFormularioTendenciaYNumerologitos(){
   document.getElementById('cfgTendMartingalaSwitch').classList.toggle('on', t.martingalaActiva !== false);
   document.getElementById('cfgTendMartingalaNivel').value = t.martingalaNivelMaximo || 4;
   document.getElementById('cfgTendMartingalaNivelWrap').style.display = t.martingalaActiva !== false ? 'grid' : 'none';
+  CFG_TEND_RANGO_SEL = t.rangoHistorico || 'todo'; // 🆕
+  inicializarChipsRango('cfgTendRangoChips', CFG_TEND_RANGO_SEL, (r)=>{ CFG_TEND_RANGO_SEL = r; }); // 🆕
 
   const n = GEN_CONFIG.numerologitos;
   document.getElementById('cfgNtoSorteos').value = n.sorteosExclusion;
@@ -264,6 +252,8 @@ function cfgPintarFormularioTendenciaYNumerologitos(){
   document.getElementById('cfgNtoMartingalaSwitch').classList.toggle('on', n.martingalaActiva !== false);
   document.getElementById('cfgNtoMartingalaNivel').value = n.martingalaNivelMaximo || 4;
   document.getElementById('cfgNtoMartingalaNivelWrap').style.display = n.martingalaActiva !== false ? 'grid' : 'none';
+  CFG_NTO_RANGO_SEL = n.rangoHistorico || 'todo'; // 🆕
+  inicializarChipsRango('cfgNtoRangoChips', CFG_NTO_RANGO_SEL, (r)=>{ CFG_NTO_RANGO_SEL = r; }); // 🆕
 }
 
 function cfgInicializarListenersTendenciaYNumerologitos(){
@@ -292,6 +282,7 @@ function cfgInicializarListenersTendenciaYNumerologitos(){
         cantidadObjetivo: parseInt(document.getElementById('cfgTendCantidad').value, 10) || 40,
         martingalaActiva: document.getElementById('cfgTendMartingalaCheck').checked,
         martingalaNivelMaximo: parseInt(document.getElementById('cfgTendMartingalaNivel').value, 10) || 4,
+        rangoHistorico: CFG_TEND_RANGO_SEL, // 🆕
       });
       txt.textContent = 'Guardado ✓';
       toast('Configuración de "Generar numerólogo" guardada.', 'success');
@@ -327,6 +318,7 @@ function cfgInicializarListenersTendenciaYNumerologitos(){
         cantidadObjetivo: parseInt(document.getElementById('cfgNtoCantidad').value, 10) || 20,
         martingalaActiva: document.getElementById('cfgNtoMartingalaCheck').checked,
         martingalaNivelMaximo: parseInt(document.getElementById('cfgNtoMartingalaNivel').value, 10) || 4,
+        rangoHistorico: CFG_NTO_RANGO_SEL, // 🆕
       });
       txt.textContent = 'Guardado ✓';
       toast('Configuración de "Numerologitos" guardada.', 'success');
@@ -355,7 +347,7 @@ function cfgInicializarListenersTendenciaYNumerologitos(){
    INIT
    ======================================================================== */
 async function abrirVistaConfiguracion(){
-  if(!esAdmin()) return; // seguridad adicional, ver también nav.js
+  if(!esAdmin()) return;
   cfgIniciarListenerEstadoScript();
 
   if(!CFG_NUM_INICIALIZADO){
