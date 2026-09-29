@@ -1,61 +1,7 @@
 /* ========================================================================
    LOTERIAS.JS
    Catálogo dinámico de loterías: suscripción en tiempo real a Firestore, filtro "un tipo / más de una jugada", y helpers para poblar los selects de lotería en toda la app.
-   🆕 Agrega el helper de "rango histórico" (todo/3m/2m/1m/15d), reutilizado
-   por generador-numeros.js, simulacion.js y configuracion.js.
    ======================================================================== */
-
-/* ======================================================================
-   🆕 RANGO HISTÓRICO — cuánto historial hacia atrás se usa para generar
-   números (Numerólogo, Tendencia, Numerologitos y Simulación).
-   ====================================================================== */
-const RANGOS_HISTORICOS = [
-  { id:'todo', label:'Todo el historial' },
-  { id:'3m',   label:'Últimos 3 meses' },
-  { id:'2m',   label:'Últimos 2 meses' },
-  { id:'1m',   label:'Último mes' },
-  { id:'15d',  label:'Últimos 15 días' },
-];
-
-/* Calcula la fecha límite (string 'YYYY-MM-DD') hacia atrás desde
-   `fechaRef` (o desde hoy si no se pasa). Devuelve null para 'todo'. */
-function obtenerFechaLimiteRango(rango, fechaRef){
-  if(!rango || rango === 'todo') return null;
-  const ref = fechaRef ? new Date(fechaRef + 'T00:00:00') : new Date();
-  const d = new Date(ref);
-  if(rango === '3m') d.setMonth(d.getMonth() - 3);
-  else if(rango === '2m') d.setMonth(d.getMonth() - 2);
-  else if(rango === '1m') d.setMonth(d.getMonth() - 1);
-  else if(rango === '15d') d.setDate(d.getDate() - 15);
-  else return null;
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-/* Filtra un historial [{fecha,numeros}] dejando solo lo posterior o
-   igual al límite del rango (relativo a `fechaRef`, o a hoy si no se
-   pasa). Si `rango` es 'todo' (o vacío), devuelve el historial tal cual. */
-function recortarHistorialPorRango(historial, rango, fechaRef){
-  const limite = obtenerFechaLimiteRango(rango, fechaRef);
-  if(!limite) return historial;
-  return historial.filter(d => d.fecha >= limite);
-}
-
-/* Pinta los chips de rango dentro de `contenedorId` y engancha el click,
-   mismo patrón que inicializarFiltroTipoLoteria. */
-function inicializarChipsRango(contenedorId, valorInicial, onChange){
-  const cont = document.getElementById(contenedorId);
-  if(!cont) return;
-  cont.innerHTML = RANGOS_HISTORICOS.map(r=>
-    `<div class="filter-tab${r.id===valorInicial?' active':''}" data-rango="${r.id}">${r.label}</div>`
-  ).join('');
-  cont.addEventListener('click', (e)=>{
-    const tab = e.target.closest('.filter-tab');
-    if(!tab) return;
-    cont.querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
-    tab.classList.add('active');
-    onChange(tab.dataset.rango);
-  });
-}
 
 /* ======================================================================
    CATÁLOGO DE LOTERÍAS: SUSCRIPCIÓN EN TIEMPO REAL (admin y vendedor)
@@ -179,8 +125,4 @@ function poblarSelectLoterias(){
    "un tipo / más de una / todas" elegido en el modal. Así se evita, sin
    depender de que el admin se acuerde, mandarle dos veces la jugada al
    mismo jugador en el mismo sorteo. Se refresca cada vez que cambia el
-   vendedor, la fecha, el filtro, o llegan jugadas nuevas por Firestore.
-   🆕 Esta función se REEMPLAZA por completo en jugadas.js, que ahora
-   arranca de la lista pre-filtrada por simulación (NJ_LOTERIAS_FILTRADAS_SIM)
-   en vez de listaLoteriasOrdenadas(). Se deja aquí solo el comentario
-   para que quede claro dónde vive la versión real. */
+   vendedor, la fecha, el filtro, o llegan jugadas nuevas por Firestore. */

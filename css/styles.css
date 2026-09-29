@@ -474,6 +474,20 @@
   /* ---- Nueva jugada: botón "Generar numerólogo" (tendencia alto/bajo) ---- */
   .nj-numerologo-botones{ display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
   .nj-generado-box{ margin-top:8px; line-height:1.5; }
+  .nj-auto-wrap{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .nj-auto-box{ margin:8px 0 12px; }
+  .auto-grupo{ border:1.5px solid var(--border, #e3e6ea); border-radius:12px; padding:10px 12px; margin-bottom:10px; background:var(--surface, #fff); }
+  .auto-grupo.elegido{ border-color:var(--primary); background:var(--primary-soft); }
+  .auto-grupo-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .auto-grupo-titulo{ font-weight:700; font-size:13.5px; }
+  .auto-grupo-desc{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .auto-grupo-lista{ margin-top:8px; font-size:12px; }
+  .auto-grupo-fila{ display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-top:1px dashed var(--border, #e3e6ea); }
+  .auto-grupo-fila .n{ flex:1; font-weight:600; }
+  .auto-grupo-fila .m{ white-space:nowrap; color:var(--muted); }
+  .nj-auto-on .nj-hide-auto{ display:none !important; }
+  .auto-pos{ color:var(--success); font-weight:700; }
+  .auto-neg{ color:var(--danger); font-weight:700; }
   .divider{ height:1px; background:var(--border); margin:16px 0; }
   .avail-numbers{ background:var(--surface-2); border-radius:10px; padding:14px; }
 

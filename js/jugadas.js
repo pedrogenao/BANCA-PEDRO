@@ -18,6 +18,11 @@
    ====================================================================== */
 let NJ_JUGADORES_SELECCIONADOS = new Set();
 
+/* Estado del modo "Automática" (ver automatica.js). Cuando está activo,
+   la lista de loterías del modal se limita al grupo elegido y los números
+   se generan solos con la estrategia con la que se testeó ese grupo. */
+let NJ_AUTO = { activo:false, estrategia:'numerologo', tipo:'QUINIELA', grupo:'', loterias:new Set() };
+
 function poblarSelectVendedores(){
   const lista = document.getElementById('njJugadoresList');
   if(!lista) return;
@@ -110,12 +115,19 @@ function actualizarLoteriasDisponiblesNJ(){
       !JUGADAS.some(j => j.loteria === loteria && j.fecha === fecha && j.estado !== 'rechazada')
     );
   }
-  disponibles = filtrarLoteriasPorTipo(disponibles, filtroTipoLoteriaNJ);
+  if(NJ_AUTO.activo){
+    // Modo Automática: solo las loterías del grupo elegido (ignora el filtro de tipo).
+    disponibles = disponibles.filter(l => NJ_AUTO.loterias.has(l));
+  } else {
+    disponibles = filtrarLoteriasPorTipo(disponibles, filtroTipoLoteriaNJ);
+  }
 
   if(disponibles.length === 0){
     sel.innerHTML = LOTERIAS.length === 0
       ? '<option value="">— cargando catálogo de loterías... —</option>'
-      : '<option value="">— todas las loterías de este filtro ya fueron enviadas para esta fecha —</option>';
+      : (NJ_AUTO.activo
+          ? '<option value="">— ninguna lotería del grupo automático está disponible para esta fecha —</option>'
+          : '<option value="">— todas las loterías de este filtro ya fueron enviadas para esta fecha —</option>');
     document.getElementById('njHoraSorteo').value = '';
     //  RESETEAR TIPOS DEL NUMERÓLOGO AL NO HABER LOTERÍAS DISPONIBLES
     resetearNumerologoNJ();
@@ -182,6 +194,9 @@ function resetearNumerologoNJ(){
   // así que en ningún momento queda visible en pantalla un monto de la
   // lotería anterior mientras se calcula el nuevo.
   actualizarMontosPorJugadorNJ();
+
+  // Modo Automática: tras limpiar, se recalcula el plan de las loterías marcadas.
+  if(NJ_AUTO.activo && typeof autoRefrescarPlan === 'function') autoRefrescarPlan();
 }
 
 
@@ -192,6 +207,7 @@ document.getElementById('btnNuevaJugada').addEventListener('click', ()=>{
   document.getElementById('njNumeros').value='';
   document.getElementById('njTotal').value='';
   NJ_JUGADORES_SELECCIONADOS.clear();
+  if(typeof autoSalirNJ === 'function') autoSalirNJ(true); // siempre arranca en modo manual
 
   poblarSelectVendedores(); // repinta el checklist de jugadores (todos desmarcados)
   
@@ -1096,6 +1112,9 @@ document.getElementById('btnEnviarJugada').addEventListener('click', async ()=>{
   // la jugada recién enviada como duplicada.
   if(btn.disabled) return;
 
+  // Modo Automática: una jugada separada por CADA lotería marcada del grupo, a cada jugador (ver automatica.js)
+  if(NJ_AUTO.activo){ return autoEnviarSeleccionadas(btn); }
+
   const jugadores = Array.from(NJ_JUGADORES_SELECCIONADOS);
   const loteria = document.getElementById('njLoteria').value;
   const fecha = document.getElementById('njFecha').value;
@@ -1188,6 +1207,7 @@ document.getElementById('btnEnviarJugada').addEventListener('click', async ()=>{
         ticketId: generarTicketId(), vendedor, loteria, tipoJugada, fecha, numeros: numerosDelJugador,
         horaSorteo, limiteJuego: `${fecha}T${horaSorteo}:00`,
         montoPorNumero, montoTotal, estado:'pendiente',
+        ...(NJ_AUTO.activo ? { modoAutomatico:true, grupoAutomatico:NJ_AUTO.grupo } : {}),
         estrategiaGeneracion: NJ_ESTRATEGIA_ACTUAL, // qué estrategia generó estos números — usada para la martingala de esa estrategia (ver Configuración)
         enviadoPor: CURRENT_USER.usuario,
         fechaEnvio: firebase.firestore.FieldValue.serverTimestamp(),

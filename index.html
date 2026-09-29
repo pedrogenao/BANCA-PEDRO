@@ -1358,7 +1358,7 @@
 <div class="modal-bg" id="modalNuevaJugada">
   <div class="modal" style="max-width:520px;">
     <div class="modal-head"><h3>Enviar jugada a jugadores</h3><button class="modal-close" data-close>&times;</button></div>
-    <div class="modal-body">
+    <div class="modal-body" id="njModalBodyNJ">
       <div class="field">
         <label>Jugadores</label>
         <div class="nj-jugadores-toolbar">
@@ -1370,14 +1370,14 @@
         <div class="hint">Elige a uno, varios o todos los jugadores. La jugada se enviará a cada uno con su propio nivel de martingala.</div>
       </div>
       <div class="grid grid-2">
-        <div class="field">
+        <div class="field nj-hide-auto">
           <label>Lotería</label>
           <div class="filter-tabs" id="filtroTipoLoteriaNJ" style="margin-bottom:6px;"></div>
           <select id="njLoteria"></select>
         </div>
         <div class="field"><label>Fecha del sorteo</label><input type="date" id="njFecha" /></div>
       </div>
-      <div class="field">
+      <div class="field nj-hide-auto">
         <label>Hora límite / hora del sorteo</label>
         <input type="time" id="njHoraSorteo" />
         <div class="hint">Se sugiere sola según la lotería elegida; puedes ajustarla. El jugador verá una cuenta regresiva hasta esta hora.</div>
@@ -1385,14 +1385,50 @@
 
       <div class="field">
         <label>Tipo de jugada (según el Numerólogo)</label>
-        <div class="avail-numbers" style="margin-bottom:6px;">
+        <div class="avail-numbers nj-hide-auto" style="margin-bottom:6px;">
           <div class="small-muted" id="njTiposEstado">Elige lotería y fecha, luego toca "Cargar tipos".</div>
           <div class="filter-tabs" id="njTiposChips" style="margin-top:8px;"></div>
         </div>
+        <div class="nj-auto-wrap">
+          <button class="btn btn-primary btn-sm" id="btnAutoNJ" type="button">🤖 Automática (testear y elegir grupo)</button>
+          <button class="btn btn-outline btn-sm" id="btnAutoSalirNJ" type="button" style="display:none;">Salir de automática</button>
+        </div>
+        <div class="small-muted" id="njAutoResumen" style="display:none; margin:6px 0;"></div>
+        <div class="avail-numbers nj-auto-box" id="njAutoBox" style="display:none;">
+          <div class="small-muted" style="margin-bottom:10px;">Testea con la <b>simulación</b> todas las loterías de más de una jugada en los últimos días, te las agrupa (más rentables, más perdedoras, niveles de martingala más altos) y luego solo juegas el grupo que elijas, con la estrategia con la que se probó.</div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>Estrategia a testear</label>
+            <div class="filter-tabs" id="njAutoEstrategiaChips">
+              <div class="filter-tab active" data-estrategia="numerologo">Cargar tipos (Numerólogo)</div>
+              <div class="filter-tab" data-estrategia="tendencia">Generar numerólogo (tendencia)</div>
+              <div class="filter-tab" data-estrategia="numerologitos">Numerologitos</div>
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>Tipo de jugada</label>
+            <div class="filter-tabs" id="njAutoTipoChips">
+              <div class="filter-tab active" data-tipo="QUINIELA">Quiniela</div>
+              <div class="filter-tab" data-tipo="PALE">Palé</div>
+              <div class="filter-tab" data-tipo="TRIPLETAS">Tripleta</div>
+              <div class="filter-tab" data-tipo="GANAR 85% SEGURO">Ganar 85%</div>
+            </div>
+          </div>
+          <div class="grid grid-2">
+            <div class="field"><label>Rango hacia atrás (días)</label><input type="number" id="njAutoDias" min="3" max="90" step="1" value="10" /></div>
+            <div class="field"><label>Inversión inicial por número (RD$)</label><input type="number" id="njAutoMontoBase" min="1" max="100" step="1" value="5" /></div>
+          </div>
+          <div class="hint" style="margin:0 0 8px;">La martingala (activa y nivel máximo) se toma de <b>Configuración</b> para la estrategia elegida, igual que al enviar la jugada.</div>
+          <button class="btn btn-primary btn-sm" id="btnAutoTestear" type="button">Testear todas las loterías</button>
+          <span class="small-muted" id="njAutoEstado" style="margin-left:8px;"></span>
+          <div id="njAutoGrupos" style="margin-top:12px;"></div>
+          <div id="njAutoPlan" style="margin-top:12px;"></div>
+        </div>
+        <div id="njManualGenBtns">
         <button class="btn btn-outline btn-sm" id="btnCargarTiposNJ" type="button"> Cargar tipos del Numerólogo</button>
         <div class="nj-numerologo-botones">
           <button class="btn btn-outline btn-sm" id="btnGenerarNumerologo" type="button"> Generar numerólogo (tendencia)</button>
           <button class="btn btn-outline btn-sm" id="btnGenerarNumerologuitos" type="button"> Numerologuitos</button>
+        </div>
         </div>
         <div class="avail-numbers nj-generado-box" id="njGeneradoBox" style="display:none;">
           <div class="small-muted" id="njGeneradoEstado"></div>
@@ -1401,17 +1437,17 @@
         <p class="small-muted" style="margin:6px 0 0;">Todos los parámetros de estas 3 formas de generar números se editan en Configuración → Numerólogo / Generar numerólogo (tendencia) / Numerologitos.</p>
       </div>
 
-      <div class="field">
+      <div class="field nj-hide-auto">
         <label>Tipo de jugada</label>
         <input id="njTipo" placeholder="ej. Quiniela, Palé, Tripleta..." />
         <div class="hint">Se llena solo al tocar un tipo arriba, o escríbelo tú mismo.</div>
       </div>
-      <div class="field">
+      <div class="field nj-hide-auto">
         <label>Números (separados por coma)</label>
         <textarea id="njNumeros" rows="2" placeholder="ej. 05, 18, 27"></textarea>
         <div class="hint">Se llena solo con los números del tipo elegido; puedes editarlos antes de enviar.</div>
       </div>
-      <div class="field">
+      <div class="field nj-hide-auto">
         <label>Monto por número (por jugador)</label>
         <div class="hint">Se calcula sola según la racha de martingala de cada jugador en esta lotería. Si un jugador no tiene pérdidas activas, se usa monto manual (por defecto RD$5, editable).</div>
         <div class="nj-montos-list" id="njMontosPorJugador">
@@ -1526,6 +1562,7 @@
 <script src="js/resultados-engine.js?v=202608052020"></script>
 <script src="js/roi.js?v=202608052020"></script>
 <script src="js/simulacion.js?v=202608052020"></script>
+<script src="js/automatica.js?v=202609290001"></script>
 <script src="js/resultados.js?v=202608052020"></script>
 <script src="js/saldo.js?v=202608052020"></script>
 <script src="js/nomina.js?v=202608052020"></script>
