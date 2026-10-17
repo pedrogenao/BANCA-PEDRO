@@ -2,22 +2,17 @@
    CONFIGURACION.JS
    Vista "Configuración" (solo admin):
      1) Estado de main.py (en línea / desconectado) — solo lectura.
-     2) Numerólogo (por tipo de jugada) — usado por Números→Numerólogo y
-        Enviar jugada→Cargar tipos.
-     3) Generar numerólogo (tendencia) — usado por Enviar jugada.
-     4) Numerologitos — usado por Enviar jugada.
-   Las secciones 2/3/4 editan `sistema_config/generacion_app` (ver
+     2) Numerólogo (por tipo de jugada) — QUINIELAS.
+     3) Generar numerólogo (tendencia) — QUINIELAS.
+     4) Numerologitos — QUINIELAS.
+     5) Loterías de un solo tipo (KINO, LOTOMAS, LOTO_REAL, LOTO_POOL).
+   Las secciones 2/3/4/5 editan `sistema_config/generacion_app` (ver
    js/generador-numeros.js), que el resto de la app lee en tiempo real.
    ======================================================================== */
 
 const COL_CONFIG_GENERACION = 'sistema_config';
 const DOC_ESTADO_SCRIPT = 'estado_script';
-
-/* Cada cuánto se considera "vencido" el latido del script. main.py late
-   cada 45s (LATIDO_INTERVALO_SEGUNDOS); si pasan más de este umbral sin
-   noticias, se muestra "Desconectado" aunque el último dato en Firestore
-   diga online:true (el script pudo haberse caído sin avisar). */
-const CFG_ESTADO_UMBRAL_MS = 2 * 60 * 1000; // 2 minutos
+const CFG_ESTADO_UMBRAL_MS = 2 * 60 * 1000;
 
 let CFG_ESTADO_UNSUB = null;
 let CFG_ESTADO_INTERVAL = null;
@@ -81,16 +76,12 @@ function cfgIniciarListenerEstadoScript(){
 }
 
 /* ========================================================================
-   1) NUMERÓLOGO (por tipo de jugada)
+   1) NUMERÓLOGO (por tipo de jugada) — QUINIELAS
    ======================================================================== */
 let CFG_NUM_ESTRATEGIAS_SEL = [];
 let CFG_NUM_POSICIONES_SEL = [];
 let CFG_NUM_INICIALIZADO = false;
 
-/* "Descuenta últimos sorteo" solo tiene sentido (y solo queda disponible
-   para elegir) si el switch "Excluir sorteos recientes del lado ganador"
-   está activo, porque ese filtro usa justamente esa configuración
-   (cantidad de sorteos y posiciones) para armar su pool. */
 function cfgNumExclusionActiva(){
   return document.getElementById('cfgNumExclusionCheck').checked;
 }
@@ -113,16 +104,12 @@ function cfgNumPintarChipsEstrategias(){
       const idx = CFG_NUM_ESTRATEGIAS_SEL.indexOf(id);
       if(idx === -1) CFG_NUM_ESTRATEGIAS_SEL.push(id);
       else CFG_NUM_ESTRATEGIAS_SEL.splice(idx, 1);
-      if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = [id]; // al menos una
+      if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = [id];
       chip.classList.toggle('active', CFG_NUM_ESTRATEGIAS_SEL.includes(id));
     });
   });
 }
 
-/* Si se apaga "Excluir sorteos recientes del lado ganador" y
-   "Descuenta últimos sorteo" estaba seleccionado, se desmarca solo
-   (queda al menos una estrategia activa) y se repintan los chips para
-   que ese filtro se vea deshabilitado. */
 function cfgNumSincronizarDescuentaConExclusion(){
   if(!cfgNumExclusionActiva()){
     const idx = CFG_NUM_ESTRATEGIAS_SEL.indexOf('descuenta_ultimos_sorteo');
@@ -148,9 +135,6 @@ function cfgNumPintarChipsPosiciones(){
   });
 }
 
-/* Rellena el formulario de la sección 1 con lo que haya en GEN_CONFIG.
-   Se llama al abrir la vista y cada vez que llega un cambio remoto (por
-   ejemplo, si dos admins tienen Configuración abierta a la vez). */
 function cfgNumPintarFormulario(){
   const cfg = GEN_CONFIG.numerologo;
   CFG_NUM_ESTRATEGIAS_SEL = (cfg.estrategias || []).slice();
@@ -167,10 +151,6 @@ function cfgNumPintarFormulario(){
   document.getElementById('cfgNumExclusionCantidad').value = cfg.exclusionCantidad;
   document.getElementById('cfgNumExclusionOpcionesWrap').style.display = cfg.exclusion ? 'block' : 'none';
 
-  // Si en Firestore quedó guardado "descuenta_ultimos_sorteo" con la
-  // exclusión apagada (config vieja o editada desde otro lado), se limpia
-  // acá antes de pintar los chips para no mostrar un filtro seleccionado
-  // que en realidad no está disponible.
   if(!cfg.exclusion){
     CFG_NUM_ESTRATEGIAS_SEL = CFG_NUM_ESTRATEGIAS_SEL.filter(id=>id !== 'descuenta_ultimos_sorteo');
     if(CFG_NUM_ESTRATEGIAS_SEL.length === 0) CFG_NUM_ESTRATEGIAS_SEL = ['caliente'];
@@ -192,8 +172,6 @@ function cfgNumInicializarListenersFormulario(){
   document.getElementById('cfgNumExclusionCheck').addEventListener('change', e=>{
     document.getElementById('cfgNumExclusionSwitch').classList.toggle('on', e.target.checked);
     document.getElementById('cfgNumExclusionOpcionesWrap').style.display = e.target.checked ? 'block' : 'none';
-    // "Descuenta últimos sorteo" depende de este switch: si se apaga, se
-    // desmarca solo (si estaba elegido) y el chip queda deshabilitado.
     cfgNumSincronizarDescuentaConExclusion();
   });
   document.getElementById('cfgNumMartingalaCheck').addEventListener('change', e=>{
@@ -246,7 +224,7 @@ function cfgNumInicializarListenersFormulario(){
 }
 
 /* ========================================================================
-   2) GENERAR NUMERÓLOGO (tendencia) — 3) NUMEROLOGITOS
+   2) GENERAR NUMERÓLOGO (tendencia) — 3) NUMEROLOGITOS (quinielas)
    ======================================================================== */
 function cfgPintarFormularioTendenciaYNumerologitos(){
   const t = GEN_CONFIG.numerologoTendencia;
@@ -340,7 +318,7 @@ function cfgInicializarListenersTendenciaYNumerologitos(){
   });
 
   document.getElementById('btnCfgRestaurar').addEventListener('click', async ()=>{
-    if(!confirm('¿Restaurar las 3 configuraciones (Numerólogo, Generar numerólogo y Numerologitos) a sus valores por defecto?')) return;
+    if(!confirm('¿Restaurar las 4 configuraciones (Numerólogo, Generar numerólogo, Numerologitos y Loterías de un solo tipo) a sus valores por defecto?')) return;
     try{
       await genRestaurarConfigPorDefecto();
       toast('Configuración restaurada a los valores por defecto.', 'success');
@@ -352,10 +330,130 @@ function cfgInicializarListenersTendenciaYNumerologitos(){
 }
 
 /* ========================================================================
+   4) LOTERÍAS DE UN SOLO TIPO (KINO, LOTOMAS, LOTO_REAL, LOTO_POOL)
+   ------------------------------------------------------------------
+   Cada una tiene rango y cantidad FIJOS (los define la naturaleza de la
+   lotería). Aquí solo se configuran estrategias, exclusión de recientes
+   y martingala, SEPARADO de la config de quinielas.
+   ======================================================================== */
+let CFG_UNI_ESTRATEGIAS_SEL = [];
+let CFG_UNI_POSICIONES_SEL = [];
+let CFG_UNI_INICIALIZADO = false;
+
+function cfgUniExclusionActiva(){
+  const el = document.getElementById('cfgUniExclusionCheck');
+  return el ? el.checked : false;
+}
+
+function cfgUniPintarChipsEstrategias(){
+  const cont = document.getElementById('cfgUniEstrategiasChips');
+  if(!cont) return;
+  // Solo estrategias que aplican a loterías de un tipo (sin "descuenta
+  // últimos sorteo", que necesita tendencia alto/bajo — no aplica aquí).
+  const disponibles = GEN_ESTRATEGIAS.filter(e => e.id !== 'descuenta_ultimos_sorteo');
+  cont.innerHTML = disponibles.map(e=>{
+    const clases = ['filter-tab'];
+    if(CFG_UNI_ESTRATEGIAS_SEL.includes(e.id)) clases.push('active');
+    return `<div class="${clases.join(' ')}" data-estrategia="${e.id}">${e.label}</div>`;
+  }).join('');
+  cont.querySelectorAll('.filter-tab').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const id = chip.dataset.estrategia;
+      const idx = CFG_UNI_ESTRATEGIAS_SEL.indexOf(id);
+      if(idx === -1) CFG_UNI_ESTRATEGIAS_SEL.push(id);
+      else CFG_UNI_ESTRATEGIAS_SEL.splice(idx, 1);
+      if(CFG_UNI_ESTRATEGIAS_SEL.length === 0) CFG_UNI_ESTRATEGIAS_SEL = [id];
+      chip.classList.toggle('active', CFG_UNI_ESTRATEGIAS_SEL.includes(id));
+    });
+  });
+}
+
+function cfgUniPintarChipsPosiciones(){
+  document.querySelectorAll('#cfgUniExclusionPosicionesChips .filter-tab').forEach(chip=>{
+    const pos = Number(chip.dataset.pos);
+    chip.classList.toggle('active', CFG_UNI_POSICIONES_SEL.includes(pos));
+    chip.addEventListener('click', ()=>{
+      const idx = CFG_UNI_POSICIONES_SEL.indexOf(pos);
+      if(idx === -1) CFG_UNI_POSICIONES_SEL.push(pos);
+      else CFG_UNI_POSICIONES_SEL.splice(idx, 1);
+      if(CFG_UNI_POSICIONES_SEL.length === 0) CFG_UNI_POSICIONES_SEL = [pos];
+      chip.classList.toggle('active', CFG_UNI_POSICIONES_SEL.includes(pos));
+    });
+  });
+}
+
+function cfgUniPintarFormulario(){
+  const cfg = GEN_CONFIG.loteriasUnicas;
+  CFG_UNI_ESTRATEGIAS_SEL = (cfg.estrategias || []).slice();
+  CFG_UNI_POSICIONES_SEL = (cfg.exclusionPosiciones || []).slice();
+
+  const exclChk = document.getElementById('cfgUniExclusionCheck');
+  if(exclChk){
+    exclChk.checked = !!cfg.exclusion;
+    document.getElementById('cfgUniExclusionSwitch')?.classList.toggle('on', !!cfg.exclusion);
+    document.getElementById('cfgUniExclusionCantidad').value = cfg.exclusionCantidad;
+    document.getElementById('cfgUniExclusionOpcionesWrap').style.display = cfg.exclusion ? 'block' : 'none';
+  }
+
+  cfgUniPintarChipsEstrategias();
+  cfgUniPintarChipsPosiciones();
+
+  const martChk = document.getElementById('cfgUniMartingalaCheck');
+  if(martChk){
+    martChk.checked = cfg.martingalaActiva !== false;
+    document.getElementById('cfgUniMartingalaSwitch')?.classList.toggle('on', cfg.martingalaActiva !== false);
+    document.getElementById('cfgUniMartingalaNivel').value = cfg.martingalaNivelMaximo || 4;
+    document.getElementById('cfgUniMartingalaNivelWrap').style.display = cfg.martingalaActiva !== false ? 'grid' : 'none';
+  }
+}
+
+function cfgUniInicializarListenersFormulario(){
+  document.getElementById('cfgUniExclusionCheck')?.addEventListener('change', e=>{
+    document.getElementById('cfgUniExclusionSwitch')?.classList.toggle('on', e.target.checked);
+    document.getElementById('cfgUniExclusionOpcionesWrap').style.display = e.target.checked ? 'block' : 'none';
+  });
+  document.getElementById('cfgUniMartingalaCheck')?.addEventListener('change', e=>{
+    document.getElementById('cfgUniMartingalaSwitch')?.classList.toggle('on', e.target.checked);
+    document.getElementById('cfgUniMartingalaNivelWrap').style.display = e.target.checked ? 'grid' : 'none';
+  });
+  document.getElementById('cfgUniMartingalaNivel')?.addEventListener('change', e=>{
+    e.target.value = Math.min(10, Math.max(1, parseInt(e.target.value, 10) || 4));
+  });
+  document.getElementById('cfgUniExclusionCantidad')?.addEventListener('change', e=>{
+    e.target.value = Math.min(15, Math.max(1, parseInt(e.target.value, 10) || 5));
+  });
+
+  document.getElementById('btnCfgGuardarLoteriasUnicas')?.addEventListener('click', async ()=>{
+    const btn = document.getElementById('btnCfgGuardarLoteriasUnicas');
+    const txt = document.getElementById('cfgUniGuardadoTxt');
+    btn.disabled = true;
+    try{
+      await genGuardarSeccionConfig('loteriasUnicas', {
+        estrategias: CFG_UNI_ESTRATEGIAS_SEL.slice(),
+        exclusion: document.getElementById('cfgUniExclusionCheck').checked,
+        exclusionCantidad: parseInt(document.getElementById('cfgUniExclusionCantidad').value, 10) || 5,
+        exclusionPosiciones: CFG_UNI_POSICIONES_SEL.slice().sort(),
+        martingalaActiva: document.getElementById('cfgUniMartingalaCheck').checked,
+        martingalaNivelMaximo: parseInt(document.getElementById('cfgUniMartingalaNivel').value, 10) || 4,
+      });
+      txt.textContent = 'Guardado ✓';
+      toast('Configuración de loterías de un solo tipo guardada.', 'success');
+    }catch(err){
+      console.error(err);
+      txt.textContent = '';
+      toast('No se pudo guardar: ' + err.message, 'danger');
+    }finally{
+      btn.disabled = false;
+      setTimeout(()=>{ txt.textContent=''; }, 3000);
+    }
+  });
+}
+
+/* ========================================================================
    INIT
    ======================================================================== */
 async function abrirVistaConfiguracion(){
-  if(!esAdmin()) return; // seguridad adicional, ver también nav.js
+  if(!esAdmin()) return;
   cfgIniciarListenerEstadoScript();
 
   if(!CFG_NUM_INICIALIZADO){
@@ -365,9 +463,16 @@ async function abrirVistaConfiguracion(){
     genEscucharConfig(()=>{
       cfgNumPintarFormulario();
       cfgPintarFormularioTendenciaYNumerologitos();
+      if(CFG_UNI_INICIALIZADO) cfgUniPintarFormulario();
     });
   } else {
     cfgNumPintarFormulario();
     cfgPintarFormularioTendenciaYNumerologitos();
   }
+
+  if(!CFG_UNI_INICIALIZADO){
+    CFG_UNI_INICIALIZADO = true;
+    cfgUniInicializarListenersFormulario();
+  }
+  cfgUniPintarFormulario();
 }
