@@ -738,7 +738,7 @@
                 <p class="small-muted" id="numConfigInfo" style="margin:0 0 4px;"></p>
                 <p class="hint" style="margin:0 0 14px;">
                   Las estrategias, la tendencia alto/bajo y la exclusión de sorteos recientes se ajustan en
-                  <b>Configuración → Numerólogo (por tipo de jugada)</b>, y aplican igual aquí y en "Cargar tipos" de Enviar jugada.
+                  <b>Configuración → Numerólogo (por tipo de jugada)</b> y en <b>Configuración → Loterías de un solo tipo</b> según corresponda, y aplican igual aquí y en "Cargar tipos" de Enviar jugada.
                 </p>
 
                 <button class="btn btn-primary" id="btnNumerologoGenerar" style="margin-top:6px;">✨ Generar números</button>
@@ -961,8 +961,78 @@
             </div>
           </div>
 
+          <!-- ============ 4) LOTERÍAS DE UN SOLO TIPO ============ -->
+          <div class="card">
+            <div class="card-head">
+              <h3> Loterías de un solo tipo de jugada</h3>
+            </div>
+            <div class="card-body">
+              <p class="hint" style="margin-top:0;">
+                KINO, LOTOMAS, LOTO_REAL y LOTO_POOL. Cada una genera una cantidad y un rango FIJOS propios
+                (KINO 10 del 1 al 84 · LOTOMAS 6 del 00 al 99 + más + súper más · LOTO_REAL 6 del 00 al 99 ·
+                LOTO_POOL 5 del 00 al 99). Aquí solo se configura CÓMO se eligen los números — separado de la
+                configuración de las quinielas (las 3 secciones de arriba). Estos ajustes también afectan a
+                "Números → Numerólogo" y a "Enviar jugada → Cargar tipos" cuando la lotería es de un solo tipo.
+              </p>
+
+              <div class="field">
+                <label>Estrategias de generación <span class="small-muted">(elige una o varias)</span></label>
+                <div class="filter-tabs" id="cfgUniEstrategiasChips"></div>
+                <p class="hint" style="margin:6px 0 0;">"Descuenta últimos sorteo" no aparece aquí porque depende de la tendencia alto/bajo, que solo aplica a las quinielas.</p>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="field">
+                <label class="cfg-altobajo-switch" id="cfgUniExclusionSwitch" style="width:max-content;">
+                  <input type="checkbox" id="cfgUniExclusionCheck" />
+                  <span class="cfg-altobajo-track"><span class="cfg-altobajo-thumb"></span></span>
+                  <span class="cfg-altobajo-label">Excluir sorteos recientes</span>
+                </label>
+              </div>
+              <div id="cfgUniExclusionOpcionesWrap">
+                <div class="grid grid-2">
+                  <div class="field">
+                    <label>Cantidad de sorteos recientes a excluir</label>
+                    <input type="number" id="cfgUniExclusionCantidad" min="1" max="15" step="1" />
+                    <p class="hint" style="margin:6px 0 0;">De 1 a 15 sorteos.</p>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>¿Qué posición del sorteo se excluye? <span class="small-muted">(elige una o varias)</span></label>
+                  <div class="filter-tabs" id="cfgUniExclusionPosicionesChips">
+                    <div class="filter-tab" data-pos="0">1ra posición</div>
+                    <div class="filter-tab" data-pos="1">2da posición</div>
+                    <div class="filter-tab" data-pos="2">3ra posición</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="field">
+                <label class="cfg-altobajo-switch" id="cfgUniMartingalaSwitch" style="width:max-content;">
+                  <input type="checkbox" id="cfgUniMartingalaCheck" />
+                  <span class="cfg-altobajo-track"><span class="cfg-altobajo-thumb"></span></span>
+                  <span class="cfg-altobajo-label">Martingala activa</span>
+                </label>
+                <p class="hint" style="margin:6px 0 0;">Si está desactivada, las jugadas de esta estrategia siempre sugieren el monto base, sin escalar aunque el jugador pierda seguido.</p>
+              </div>
+              <div class="grid grid-2" id="cfgUniMartingalaNivelWrap">
+                <div class="field">
+                  <label>Nivel máximo de martingala</label>
+                  <input type="number" id="cfgUniMartingalaNivel" min="1" max="10" step="1" />
+                  <p class="hint" style="margin:6px 0 0;">Entre 1 y 10 niveles.</p>
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-sm" id="btnCfgGuardarLoteriasUnicas" type="button">Guardar Loterías de un solo tipo</button>
+              <span class="small-muted" id="cfgUniGuardadoTxt" style="margin-left:10px;"></span>
+            </div>
+          </div>
+
           <div class="toolbar" style="justify-content:flex-end;">
-            <button class="btn btn-outline" id="btnCfgRestaurar" type="button">Restaurar valores por defecto (las 3 secciones)</button>
+            <button class="btn btn-outline" id="btnCfgRestaurar" type="button">Restaurar valores por defecto (las 4 secciones)</button>
           </div>
         </div>
 
@@ -1555,7 +1625,7 @@
 <script src="js/auth.js?v=202608052020"></script>
 <script src="js/nav.js?v=202608052020"></script>
 <script src="js/loterias.js?v=202608052020"></script>
-<script src="js/generador-numeros.js?v=202608052020"></script>
+<script src="js/generador-numeros.js?v=202609300001"></script>
 <script src="js/admin-core.js?v=202608052020"></script>
 <script src="js/vendedores.js?v=202608052020"></script>
 <script src="js/jugadas.js?v=202608052020"></script>
@@ -1571,7 +1641,7 @@
 <script src="js/vendedor-core.js?v=202608052020"></script>
 <script src="js/caja.js?v=202608052020"></script>
 <script src="js/numeros.js?v=202608052020"></script>
-<script src="js/configuracion.js?v=202608052020"></script>
+<script src="js/configuracion.js?v=202609300001"></script>
 <script src="js/chat.js?v=202608052020"></script>
 <script src="js/nav-android.js?v=202608052020"></script>
 </body>
