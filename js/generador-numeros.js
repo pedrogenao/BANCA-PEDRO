@@ -3,10 +3,13 @@
    Motor ÚNICO y COMPARTIDO para generar números del Numerólogo.
 
    MEJORA: las loterías de UN SOLO tipo de jugada (LOTOMAS, KINO,
-   LOTO_REAL, LOTO_POOL) ahora también generan sus números analizando el
-   HISTORIAL REAL guardado en Firestore, con el MISMO motor de ponderación
-   (frecuencia + recencia + atraso + consistencia) que usan las quinielas
-   — cada una respetando su rango/cantidad específica.
+   LOTO_REAL, LOTO_POOL) ahora tienen SU PROPIA sección de configuración
+   (`loteriasUnicas`) — separada de la de quinielas (`numerologo`) — con
+   sus propias estrategias, exclusión de recientes y martingala. Cada una
+   genera sus números analizando el HISTORIAL REAL guardado en Firestore
+   con el MISMO motor de ponderación (frecuencia + recencia + atraso +
+   consistencia) que usan las quinielas, respetando el rango y cantidad
+   FIJOS de cada lotería.
    ====================================================================== */
 
 const COL_SISTEMA_CONFIG = 'sistema_config';
@@ -21,7 +24,12 @@ const GEN_ESTRATEGIAS = [
   { id:'mixto_descuenta',          label:'Mixto quitando último sorteo' },
 ];
 
+/* Valores por defecto de las 4 secciones configurables. Se usan mientras
+   llega el primer snapshot de Firestore, y como base para "Restaurar
+   valores por defecto" en Configuración. */
 const GEN_CONFIG_DEFAULT = {
+  // Usado por "Números → Numerólogo" Y por "Enviar jugada → Cargar tipos"
+  // para las QUINIELAS (Quiniela/Palé/Tripleta/Ganar 85%).
   numerologo: {
     estrategias: ['descuenta_ultimos_sorteo'],
     tendencia: true,
@@ -33,20 +41,34 @@ const GEN_CONFIG_DEFAULT = {
     martingalaActiva: true,
     martingalaNivelMaximo: 4,
   },
+  // "Enviar jugada → Generar numerólogo (tendencia)"
   numerologoTendencia: {
     sorteosTendencia: 3,
     cantidadObjetivo: 40,
     martingalaActiva: true,
     martingalaNivelMaximo: 4,
   },
+  // "Enviar jugada → Numerologitos"
   numerologitos: {
     sorteosExclusion: 10,
     cantidadObjetivo: 20,
     martingalaActiva: true,
     martingalaNivelMaximo: 4,
   },
+  // Loterías de UN SOLO tipo (KINO, LOTOMAS, LOTO_REAL, LOTO_POOL).
+  // Cantidad y rango son FIJOS de cada lotería (ver GEN_LOTERIAS_UNICAS);
+  // aquí solo se configuran estrategias, exclusión de recientes y martingala.
+  loteriasUnicas: {
+    estrategias: ['caliente'],
+    exclusion: true,
+    exclusionCantidad: 5,
+    exclusionPosiciones: [0, 1],
+    martingalaActiva: true,
+    martingalaNivelMaximo: 4,
+  },
 };
 
+/* Config activa en memoria, actualizada en tiempo real. */
 let GEN_CONFIG = JSON.parse(JSON.stringify(GEN_CONFIG_DEFAULT));
 let GEN_CONFIG_LISTENERS = [];
 let GEN_CONFIG_UNSUB = null;
@@ -54,12 +76,14 @@ let GEN_CONFIG_UNSUB = null;
 function genMezclarConDefault(datos){
   const base = JSON.parse(JSON.stringify(GEN_CONFIG_DEFAULT));
   return {
-    numerologo: { ...base.numerologo, ...(datos?.numerologo || {}) },
+    numerologo:          { ...base.numerologo,          ...(datos?.numerologo          || {}) },
     numerologoTendencia: { ...base.numerologoTendencia, ...(datos?.numerologoTendencia || {}) },
-    numerologitos: { ...base.numerologitos, ...(datos?.numerologitos || {}) },
+    numerologitos:       { ...base.numerologitos,       ...(datos?.numerologitos       || {}) },
+    loteriasUnicas:      { ...base.loteriasUnicas,      ...(datos?.loteriasUnicas      || {}) },
   };
 }
 
+/* Escucha en tiempo real `sistema_config/generacion_app`. */
 function genEscucharConfig(callback){
   if(callback) GEN_CONFIG_LISTENERS.push(callback);
   if(GEN_CONFIG_UNSUB) { if(callback) callback(GEN_CONFIG); return; }
@@ -73,6 +97,7 @@ function genEscucharConfig(callback){
     });
 }
 
+/* Guarda (merge) una sección de la configuración. */
 async function genGuardarSeccionConfig(seccion, datos){
   const payload = {};
   payload[seccion] = datos;
@@ -83,6 +108,7 @@ async function genRestaurarConfigPorDefecto(){
   await db.collection(COL_SISTEMA_CONFIG).doc(DOC_GENERACION_APP).set(GEN_CONFIG_DEFAULT, { merge:false });
 }
 
+/* Igual que categoria_loteria() en main.py. */
 function genCategoriaLoteria(nombre){
   const n = (nombre || '').toLowerCase();
   const ALIASES = {
@@ -271,7 +297,7 @@ function genGenerarPoolPorEstrategia(historial, estrategia, cantidad, universo, 
 }
 
 /* ============================================================
-   TENDENCIA / LADO GANADOR (alto/bajo) — solo para quinielas
+   TENDENCIA / LADO GANADOR (alto/bajo) — solo quinielas
    ============================================================ */
 const GEN_UNIVERSO_BAJO = Array.from({length:49}, (_,i)=>i+1);
 const GEN_UNIVERSO_ALTO = Array.from({length:50}, (_,i)=>i+50).concat([0]);
@@ -379,14 +405,14 @@ function genCombinarEstrategias(historial, estrategias, basePoolSize, opts){
 }
 
 /* ============================================================
-   UNIVERSOS Y CANTIDADES POR LOTERÍA DE UN SOLO TIPO
+   UNIVERSOS Y CANTIDADES FIJOS POR LOTERÍA DE UN SOLO TIPO
    ============================================================ */
-const GEN_UNIVERSO_KINO        = Array.from({length:84},  (_,i)=>i+1); // 1..84
-const GEN_UNIVERSO_LOTO_REAL   = Array.from({length:100}, (_,i)=>i);   // 00..99
-const GEN_UNIVERSO_LOTO_POOL   = Array.from({length:100}, (_,i)=>i);   // 00..99
-const GEN_UNIVERSO_LOTOMAS_LOTO= Array.from({length:100}, (_,i)=>i);   // loto principal 00..99
-const GEN_UNIVERSO_LOTOMAS_MAS = Array.from({length:10},  (_,i)=>i);   // "más" 0..9
-const GEN_UNIVERSO_LOTOMAS_SUPER = Array.from({length:10},(_,i)=>i);   // "súper más" 0..9
+const GEN_UNIVERSO_KINO          = Array.from({length:84},  (_,i)=>i+1); // 1..84
+const GEN_UNIVERSO_LOTO_REAL     = Array.from({length:100}, (_,i)=>i);   // 00..99
+const GEN_UNIVERSO_LOTO_POOL     = Array.from({length:100}, (_,i)=>i);   // 00..99
+const GEN_UNIVERSO_LOTOMAS_LOTO  = Array.from({length:100}, (_,i)=>i);   // 00..99
+const GEN_UNIVERSO_LOTOMAS_MAS   = Array.from({length:10},  (_,i)=>i);   // "más" 0..9
+const GEN_UNIVERSO_LOTOMAS_SUPER = Array.from({length:10},  (_,i)=>i);   // "súper más" 0..9
 
 const GEN_LOTERIAS_UNICAS = {
   kino:      { cantidad: 10, universo: GEN_UNIVERSO_KINO,         nombre: 'KINO' },
@@ -396,8 +422,7 @@ const GEN_LOTERIAS_UNICAS = {
 };
 
 /* Elige un número de `universo` ponderando por frecuencia real en
-   `contador`, con azar entre los que empatan (o entre todos si el
-   contador está vacío). */
+   `contador`, con azar entre los que empatan. */
 function genElegirPorFrecuencia(contador, universo){
   const pesos = universo.map(n => [n, (contador[n] || 0) + 0.01]);
   const seleccion = genMuestreoPonderado(pesos, 1);
@@ -407,9 +432,8 @@ function genElegirPorFrecuencia(contador, universo){
 /* ============================================================
    GENERADOR ÚNICO PARA LOTERÍAS DE UN SOLO TIPO
    ------------------------------------------------------------------
-   Analiza el historial REAL de Firestore con el mismo motor de
-   ponderación (frecuencia + recencia + atraso + consistencia) que las
-   quinielas, respetando rango y cantidad de cada lotería.
+   Usa SU PROPIA configuración (`GEN_CONFIG.loteriasUnicas`), NO la de
+   quinielas. Rango y cantidad son fijos de cada lotería.
 
    Para LOTOMAS: 6 números del loto principal (00..99) + "más" (0..9)
    + "súper más" (0..9), elegidos por frecuencia real de su posición
@@ -422,34 +446,30 @@ function genGenerarLoteriaUnica(loteria, historial){
   const def = GEN_LOTERIAS_UNICAS[cat];
   if(!def) return { numeros: [], lado: null, sinHistorial: true };
 
-  const cfg = GEN_CONFIG.numerologo;
+  // Configuración PROPIA de loterías de un solo tipo.
+  const cfg = GEN_CONFIG.loteriasUnicas;
 
-  // Filtramos cada fila del historial para quedarnos solo con los números
-  // dentro del universo de ESTA lotería (por seguridad, aunque el
-  // historial oficial nunca debería traer números fuera de rango).
   const universoSet = new Set(def.universo);
   const historialFiltrado = historial
     .map(fila => (fila || []).filter(n => universoSet.has(Number(n))))
     .filter(fila => fila.length > 0);
 
   if(!historialFiltrado.length){
-    // Sin historial válido: universo completo barajado (fallback seguro).
     return {
       numeros: genBarajar(def.universo.slice()).slice(0, def.cantidad).sort((a,b)=>a-b),
       lado: null, sinHistorial: true,
     };
   }
 
-  // Mismo motor que las quinielas: genCombinarEstrategias sobre el
-  // historial filtrado, con el universo de esta lotería. Sin tendencia
-  // alto/bajo (esa lógica es solo para quinielas de 2 dígitos).
+  // Mismo motor que las quinielas, pero con universo y cantidad FIJOS
+  // de esta lotería. Sin tendencia alto/bajo (no aplica aquí).
   const { pool } = genCombinarEstrategias(
     historialFiltrado,
     cfg.estrategias,
     def.cantidad,
     {
       tendencia: false,
-      sorteosTendencia: cfg.sorteosTendencia,
+      sorteosTendencia: 1,
       exclusion: cfg.exclusion,
       exclusionCantidad: cfg.exclusionCantidad,
       exclusionPosiciones: cfg.exclusionPosiciones,
@@ -463,7 +483,7 @@ function genGenerarLoteriaUnica(loteria, historial){
   if(cat === 'lotomas'){
     const masCont = {}, superCont = {};
     historial.forEach(fila => {
-      if(fila.length >= 7) masCont[fila[6]] = (masCont[fila[6]] || 0) + 1;
+      if(fila.length >= 7) masCont[fila[6]]   = (masCont[fila[6]]   || 0) + 1;
       if(fila.length >= 8) superCont[fila[7]] = (superCont[fila[7]] || 0) + 1;
     });
     const masElegido   = genElegirPorFrecuencia(masCont,   GEN_UNIVERSO_LOTOMAS_MAS);
@@ -485,9 +505,7 @@ function genGenerarLotomas(historial, cantidadLoto, estrategias, opts){
 }
 
 /* ============================================================
-   FUNCIÓN PRINCIPAL: genera los números de UN tipo de jugada de UNA
-   lotería. La usan tanto "Números → Numerólogo" como "Enviar jugada
-   → Cargar tipos".
+   FUNCIÓN PRINCIPAL
    ============================================================ */
 async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
   const historial = await genCargarHistorialAsc(loteria);
@@ -496,7 +514,8 @@ async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
   const cat = genCategoriaLoteria(loteria);
   const esUnica = cat !== 'general';
 
-  // --- Loterías de UN SOLO TIPO (KINO / LOTOMAS / LOTO_REAL / LOTO_POOL) ---
+  // Loterías de UN SOLO TIPO: usan su PROPIA configuración
+  // (GEN_CONFIG.loteriasUnicas) — NO la de quinielas.
   if(esUnica){
     const res = genGenerarLoteriaUnica(loteria, historial);
     return {
@@ -506,7 +525,7 @@ async function genNumerosParaTipo(loteria, tipo, cantidadGanar85Override){
     };
   }
 
-  // --- Loterías GENERALES (quinielas) ---
+  // Loterías GENERALES (quinielas): config de "numerologo".
   const cfg = GEN_CONFIG.numerologo;
   const cantidadGanar85 = cantidadGanar85Override || cfg.cantidadGanar85 || 30;
   const basePoolSize = tipo === 'GANAR 85% SEGURO'
@@ -537,5 +556,4 @@ const NUM_CANTIDAD_DEFAULT = {
   'LOTOMAS': 6,
 };
 
-// Arranca el listener en tiempo real en cuanto carga este script.
 genEscucharConfig();
